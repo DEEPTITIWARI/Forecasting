@@ -1,0 +1,306 @@
+---
+
+output: html_document
+Author: "Deepti Tiwari"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+## Forecasting
+
+###Store-*233779* for Soups-*Campbells*
+```{r fun, echo=FALSE}
+
+#Function for residual histogram
+plotForecastErrors <- function(forecasterrors,modeltype="Residual Histogram")
+{
+  # make a histogram of the forecast errors:
+  mybinsize <- IQR(forecasterrors)/4
+  mysd   <- sd(forecasterrors)
+  mymin  <- min(forecasterrors) - mysd*5
+  mymax  <- max(forecasterrors) + mysd*3
+  # generate normally distributed data with mean 0 and standard deviation mysd
+  mynorm <- rnorm(10000, mean=0, sd=mysd)
+  mymin2 <- min(mynorm)
+  mymax2 <- max(mynorm)
+  if (mymin2 < mymin) { mymin <- mymin2 }
+  if (mymax2 > mymax) { mymax <- mymax2 }
+  # make a red histogram of the forecast errors, with the normally distributed data overlaid:
+  mybins <- seq(mymin, mymax, mybinsize)
+  hist(forecasterrors, col="red", freq=FALSE, breaks=mybins, main =modeltype )
+  # freq=FALSE ensures the area under the histogram = 1
+  # generate normally distributed data with mean 0 and standard deviation mysd
+  myhist <- hist(mynorm, plot=FALSE, breaks=mybins)
+  # plot the normal curve as a blue line on top of the histogram of forecast errors:
+  points(myhist$mids, myhist$density, type="l", col="blue", lwd=2)
+}
+
+```
+
+Aligining with the business objective of inventory management for the next month, forecasting goal is to predict the number of units to be sold in next four weeks i.e Week= 53, 54, 55 and 56. From the main data set *__soup__* we aggregated the *units* on weekly basis for store-233779(basis of IRI_Key). This time series is then used through out this analysis.  
+
+Looking at the following  time series plot of this data, we can say that it has *__level__*, *__trend__* might or might not be present, which will be cleared later in this analysis and *__seasonality__* is not present. Also from ACF plot it is clear that series is not autcorelatead.   
+
+```{r timeseries plot, echo=FALSE, warning=FALSE, error=FALSE, message=FALSE, tidy=TRUE, comment="##"}
+library(forecast)
+
+
+soups <- read.csv("Campbells_233779_data.csv")
+soupstimeseries<- ts(soups)
+
+#findfrequency(soupstimeseries)
+
+ggtsdisplay(soupstimeseries)
+```
+
+Since this series contains data for 52 weeks hence cycle can not be detected, following plot gives better insight on seasonality.
+
+```{r monthplot, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, tidy=TRUE, comment="##"}
+
+monthplot(soupstimeseries)
+```
+
+
+From above plot it is clear there is no seasonality in this series.
+
+Before proceeding to fit different models on this series, we forecasted on basis of *__naive__* and *__mean__* method.
+```{r naive, echo=FALSE, warning=FALSE, error=FALSE, message=FALSE, tidy=TRUE, comment="##"}
+
+soupfit1 <- meanf(soupstimeseries,h=4)
+soupfit2 <- naive(soupstimeseries,h=4)
+
+
+plot(soupfit1, plot.conf=FALSE,
+     main="Forecasts for quarterly beer production")
+lines(soupfit2$mean,col=2)
+
+lines(soupstimeseries)
+legend("topright", lty=1, col=c(1,2),
+       legend=c("Mean method","Naive method"))
+```
+
+Following are the results of accuracy for these two methods.
+```{r result, echo=FALSE, warning=FALSE, error=FALSE, message=FALSE, tidy=TRUE, comment="##"}
+
+print("Accuracy of mean method")
+accuracy(soupfit1)
+print("Accuracy of naive method")
+accuracy(soupfit2)
+res1<- residuals(soupfit1)
+plotForecastErrors(res1)
+
+```
+
+
+As trend is not clearly visible in this time series, we will fit different models and on basis of accuracy measures and residual analysis we will decide the best model to forecast.
+
+Before running the model we have partitioned the series in __training set__ with first 48 weeks and remaining weeks are kept in __validation set__ as our forecast horizon is four weeks.
+
+```{r Partitioning, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, tidy=TRUE, comment="##"}
+souptraining<- ts(soupstimeseries[c(1:48),])
+soupvalidation<- ts(soupstimeseries[c(49:52),])
+```
+
+###Starting with regression models:
+
+1. __Linear Regression Model__
+
+```{r Model1, echo=FALSE, warning=FALSE, error=FALSE, message=FALSE, tidy=TRUE, comment="##"}
+
+soup.fit3 <- tslm(souptraining~trend)
+f3 <- forecast(soup.fit3, h=4, level=c(80,95))
+plot(f3, ylab="Units sold per week",xlab="Week",main="Forecast from Linear Model")
+lines(fitted(soup.fit3),col="blue")
+
+accuracy(f3)
+```
+
+This model gave us RMSE of __214.12__ and MAPE __58.92%__, we further analyse the residuals of this model.
+
+```{r Model1_residual, echo=FALSE, warning=FALSE, error=FALSE, message=FALSE, tidy=TRUE, comment="##"}
+res3 <- residuals(soup.fit3)
+#plot(res3, main="Residuals from linear regression method", ylab="residuals", xlab="Week")
+#abline(0,0,col="gray60")
+Acf(res3, main="ACF of linear regression residuals")
+plotForecastErrors(res3,"Histograms of Linear Model Residuals")
+```
+
+From ACF plot it is visible that there is no autocorelation but from residuals histogram we can see that mean of residuals are somewhat close to __*zero*__ and residuals are not normally distributed. However we can not conclude this as the best model to forecats without running other models.
+
+2. __Quadratic Regression Model__
+
+```{r Model2, echo=FALSE, warning=FALSE, error=FALSE, message=FALSE, tidy=TRUE, comment="##"}
+
+soup.fit4 <- tslm(souptraining~trend+I(trend^2))
+f4 <- forecast(soup.fit4, h=4, level=c(80,95))
+plot(f4, ylab="Units sold per week",xlab="Week", main="Forecast from Quadratic Model")
+lines(fitted(soup.fit4),col="blue")
+
+accuracy(f4)
+```
+Looking from actual vs predicted plot we can say that this model is fitting our series in a much better way. Also it gave us RMSE of __200.72__ and MAPE __42.82%__ which is much better than former linear model , we further analyse the residuals of this model.
+
+```{r Model2_residual, echo=FALSE, warning=FALSE, error=FALSE, message=FALSE, tidy=TRUE, comment="##"}
+
+res4 <- residuals(soup.fit4)
+#plot(res4, main="Residuals from Quadratic Model", ylab="residuals", xlab="Week")
+#abline(0,0,col="gray60")
+Acf(res4, main="ACF of Quadratic Model residuals")
+plotForecastErrors(res4,"Histograms of Quadratic Model Residuals")
+```
+
+There is no autocorelation in residuals, also from histogram it is visible that residuals are normally distributed around the mean zero. 
+
+As we found that quadrtic model performed better, we tried to smoothened the series to get some clear picture about trend. We performed centered moving average and weigthed moving average smoothing and got following graphs.
+
+```{r smoothing,echo=FALSE, warning=FALSE, error=FALSE, message=FALSE, tidy=TRUE, comment="##"}
+plot(soupstimeseries, main="Smoothing-Center Moving Average", ylab="units#", xlab="Week")
+lines(ma(soupstimeseries,8),col="red")
+
+plot(soupstimeseries, main="Smoothing-Weighted Moving Average", ylab="units#", xlab="Week")
+lines(ma(ma(soupstimeseries,4),2),col="red")
+```
+
+
+From both the graphs we can say that somewhat quadtratic trend is present in series (*in red*).
+
+Before concluding quadtratic model as best for our series we tried running few data driven model as well.
+
+###Data driven models:
+
+3. __Simple Exponential Method__
+
+```{r SES,echo=FALSE, warning=FALSE, error=FALSE, message=FALSE, tidy=TRUE, comment="##"}
+fit5 <- ses(souptraining, alpha=0.2, initial="optimal", h=4)
+fit6 <- ses(souptraining, alpha=0.6, initial="optimal", h=4)
+fit7 <- ses(souptraining, alpha=0.89,initial="optimal", h=4)
+plot(fit5, plot.conf=FALSE, ylab="Units Sold per week",
+     xlab="Week", main="", fcol="white", type="o")
+lines(fitted(fit5), col="blue", type="o")
+lines(fitted(fit6), col="red", type="o")
+lines(fitted(fit7), col="green", type="o")
+lines(fit5$mean, col="blue", type="o")
+lines(fit6$mean, col="red", type="o")
+lines(fit7$mean, col="green", type="o")
+legend("topright",lty=1, col=c(1,"blue","red","green"), 
+       c("data", expression(alpha == 0.2), expression(alpha == 0.6),
+         expression(alpha == 0.89)),pch=1)
+```
+
+
+We ran SES model with different values of constant __alpha__ and as it can be seen that blue line is fitting the trend better relative to others, same can be seen from below accuracy measures:
+
+```{r SES_accuracy,echo=FALSE, warning=FALSE, error=FALSE, message=FALSE, tidy=TRUE, comment="##"}
+print("Alpha = 0.2")
+accuracy(fit5)
+print("Alpha = 0.6")
+accuracy(fit6)
+print("Alpha = 0.89")
+accuracy(fit7)
+
+```
+Since we got insight that previous time period values are not playing important role for forecasting current period values as model with *__0.2 alpha__* gave least RMSE than others. We tried running holt and holt's winter model also to see we can get better RMSE or MAPE.
+
+
+4. __Holt's Method__
+
+```{r Holt,echo=FALSE, warning=FALSE, error=FALSE, message=FALSE, tidy=TRUE, comment="##"}
+fit8 <- holt(souptraining, alpha=0.2, beta=0.2, damped=TRUE, initial="optimal", h=4) 
+plot(fit8, type="o", ylab="Units sold per week", xlab="Week", 
+     fcol="white", plot.conf=FALSE)
+lines(fitted(fit8), col="green") 
+lines(fit8$mean, col="green", type="o") 
+legend("topright", lty=1, col=c("black","green"), 
+       c("Data","Additive damped trend"))
+
+```
+
+
+We ran damped trend holt's model, from above graph it can be seen that it is quite close in capturing the trend of the series, we then looked to accuracy measures also
+
+```{r Holt_residual,echo=FALSE, warning=FALSE, error=FALSE, message=FALSE, tidy=TRUE, comment="##"}
+accuracy(fit8)
+
+```
+
+5. __Holt's Winter Method__
+
+```{r HW,echo=FALSE, warning=FALSE, error=FALSE, message=FALSE, tidy=TRUE, comment="##"}
+
+fit9 <- HoltWinters(souptraining,alpha=0.6,beta=FALSE,gamma=FALSE)
+fit9_1 <- forecast.HoltWinters(fit9, h=4)
+fit10 <- HoltWinters(souptraining,alpha=0.2,beta=FALSE,gamma=FALSE)
+fit10_1 <- forecast.HoltWinters(fit10, h=4)
+fit11 <- HoltWinters(souptraining,alpha=0.2,beta=0.7,gamma=FALSE)
+fit11_1 <- forecast.HoltWinters(fit11, h=4)
+plot(fit9_1, type="o", ylab="Units sold per week", xlab="Week", fcol="white", plot.conf=FALSE)
+lines(fitted(fit9_1), col="green") 
+lines(fit9_1$mean, col="green", type="o") 
+lines(fitted(fit10_1), col="blue") 
+lines(fit10_1$mean, col="blue", type="o")
+lines(fitted(fit11_1), col="red") 
+lines(fit11_1$mean, col="red", type="o")
+
+legend("topright", lty=1, col=c("black","green","blue","red"), 
+       c("Data",expression(alpha == 0.6),expression(alpha == 0.2),expression(alpha == 0.6 & beta == 0.7)))
+```
+
+We ran holt's winter method with different alpha & beta values keeping gamma as *FALSE* as there is no seasonality in the series and it can be seen from above graph that model with 0.2 alpha & no constant for trend smoothing is better than others. Same is reflected from below measures.
+
+```{r Holt_accuracy,echo=FALSE, warning=FALSE, error=FALSE, message=FALSE, tidy=TRUE, comment="##"}
+print("alpha=0.6,beta=FALSE,gamma=FALSE")
+accuracy(fit9_1)
+print("alpha=0.2,beta=FALSE,gamma=FALSE")
+accuracy(fit10_1)
+print("alpha=0.2,beta=0.7,gamma=FALSE")
+accuracy(fit11_1)
+
+```
+####__At the end we tried fitting all these models on our validation set and got following results:__
+
+```{r val,echo=FALSE, warning=FALSE, error=FALSE, message=FALSE, tidy=TRUE, comment="##"}
+
+# Quadtratic
+
+soup.fitv4 <- tslm(soupvalidation~trend+I(trend^2))
+fv4 <- forecast(soup.fitv4, h=4, level=c(80,95))
+print("Accuracy of quadratic regression model")
+accuracy(fv4)
+
+#SES
+fitv5 <- ses(soupvalidation, alpha=0.2, initial="optimal", h=4)
+print("Accuracy of simpel exponential model with alpha=0.2")
+accuracy(fitv5)
+
+#HW
+fitv10 <- HoltWinters(soupvalidation,alpha=0.2,beta=FALSE,gamma=FALSE)
+fitv10_1 <- forecast.HoltWinters(fitv10, h=4)
+print("Accuracy of holt's winter exponential model with alpha=0.2 and no beta gamma")
+accuracy(fitv10_1)
+```
+
+It is clear from above results that quadtratic regression model fits best to this series with least __RMSE of 121.1__ and __35.4% of MAPE__. Hence we forecasted next four weeks units to be sold by using quadtratic regression model as follows.
+
+```{r forecast,echo=FALSE, warning=FALSE, error=FALSE, message=FALSE, tidy=TRUE, comment="##"}
+
+soup.fitfinal <- tslm(soupstimeseries~trend+I(trend^2))
+ffinal <- forecast(soup.fitfinal, h=4, level=c(80,95))
+plot(ffinal, ylab="Units sold per week",xlab="Week", main="Forecast from Quadratic Model")
+lines(fitted(soup.fitfinal),col="blue")
+print("Forecasted Values")
+
+```
+
+####Forecasted Values
+```{r, echo=FALSE, warning=FALSE, error=FALSE, message=FALSE, tidy=TRUE, comment="##"}
+ffinal
+```
+
+
+
+
+
